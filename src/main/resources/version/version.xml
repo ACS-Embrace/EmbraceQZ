@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<root>
+    <version>0.0.17</version>
+    <runtimeversion>19.0.2</runtimeversion>
+    <appname>QZ Dev</appname>
+    <shortname>QZDev</shortname>
+    <operatingsystem>win64</operatingsystem>
+    <releasenotes>Initial version.</releasenotes>
+    <type>installer</type>
+</root>

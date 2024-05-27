@@ -1,0 +1,384 @@
+/*
+The common build for all deployable projects: Desktop, Server Bridge, Client Bridge
+ */
+if (!project.hasProperty("applicationVersion")) {
+    project.ext.set("applicationVersion", "0")
+}
+if (!project.hasProperty("mainClass")) {
+    project.ext.set("mainClass", "no main class")
+}
+if (!project.hasProperty("applicationName")) {
+    project.ext.set("applicationName", "")
+}
+if (!project.hasProperty("applicationReleaseNotes")) {
+    project.ext.set("applicationReleaseNotes", "")
+}
+apply from: rootProject.file('installerutils.gradle')
+jar {
+    manifest {
+        attributes(
+            'Main-Class': "${mainClass}",
+            'Multi-Release': 'true',  // https://stackoverflow.com/questions/53049346/is-log4j2-compatible-with-java-11
+        )
+    }
+}
+
+version = project.ext.applicationVersion;
+
+def currentOS = org.gradle.internal.os.OperatingSystem.current()
+def installerPlatform
+if (currentOS.isWindows()) {
+    installerPlatform = 'win64'
+} else if (currentOS.isLinux()) {
+    installerPlatform = 'linux'
+} else if (currentOS.isMacOsX()) {
+    installerPlatform = 'mac'
+}
+def jdkExtension
+def plat
+if (currentOS.isWindows()) {
+    plat = 'win'
+    jdkExtension = '.exe'
+} else if (currentOS.isLinux()) {
+    plat = 'linux'
+    jdkExtension = ''
+} else if (currentOS.isMacOsX()) {
+    plat = 'mac'
+    jdkExtension = ''
+}
+
+/**
+ * A general jar with no provided/platform specific code.
+ * */
+task patch(type: Jar, dependsOn: [classes, processResources, compileJava]) {
+    archivesBaseName = applicationName+ "";
+    manifest.from jar.manifest
+    archiveClassifier = 'patch'
+        
+    //get the duplicated files and add them to the jar first after resolving how they're merged etc.
+    doFirst {
+        //deletes the merge folder, looks in all dependencies for confilicting files, resolves the merges, and puts them in builddir/merged
+        getMergedDuplicates(configurations.includeInPatch - configurations.providedModule).collect { it.isDirectory() ? it : zipTree(it) }
+        println("Provided " + configurations.providedModule.size());
+        println("Provided " + configurations.baseConfiguration.size());
+        println("Provided " + configurations.includeInPatch.size());
+        println("Provided " + (configurations.includeInPatch - configurations.providedModule).size());
+        for (Object configuration: (configurations.includeInPatch - configurations.providedModule)) {
+            println("Conf: " + configuration);
+        }
+    }
+    from {
+        "$buildDir/merged/"
+    } {
+        exclude 'version/version.xml'
+        exclude "META-INF/*.SF"
+        exclude "META-INF/*.DSA"
+        exclude "META-INF/*.RSA"
+        exclude 'Example*.class' //stupid qz dependency has Example files in the default package
+    }
+    
+    from {
+        sourceSets.main.output
+    } {
+        exclude 'version/version.xml'
+        exclude "META-INF/*.SF"
+        exclude "META-INF/*.DSA"
+        exclude "META-INF/*.RSA"
+        exclude 'Example*.class' //stupid qz dependency has Example files in the default package
+    }
+    
+    from {
+        configurations.includeInOutput
+    } {
+        exclude 'version/version.xml'
+        exclude "META-INF/*.SF"
+        exclude "META-INF/*.DSA"
+        exclude "META-INF/*.RSA"
+        exclude 'Example*.class' //stupid qz dependency has Example files in the default package
+    }
+    
+    from {
+        (configurations.includeInPatch.minus(configurations.providedModule)).collect { it.isDirectory() ? it : zipTree(it) }
+    }  {
+        exclude 'version/version.xml'
+        exclude "META-INF/*.SF"
+        exclude "META-INF/*.DSA"
+        exclude "META-INF/*.RSA"
+        exclude 'Example*.class' //stupid qz dependency has Example files in the default package
+    }
+    from {
+        getVersionFilePath("all", jdk, "patch", "Dev")
+    }
+    { 
+        into 'version/'
+    }
+    
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+
+task fatJarDev(type: Jar, dependsOn: [classes, processResources, compileJava]) {
+    archivesBaseName = applicationName
+    manifest.from jar.manifest
+    archiveClassifier = 'desktop'
+    from {
+        sourceSets.main.output //first so the platform provider takes highest priority
+    }{
+
+    }
+    //these are the main files
+    from {
+        (configurations.everythingConfiguration - configurations.providedModule).collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    {
+        exclude 'version/version.xml'
+        exclude "META-INF/*.SF"
+        exclude "META-INF/*.DSA"
+        exclude "META-INF/*.RSA"
+        exclude 'version/version.xml'
+        exclude 'Example*.class' //stupid qz dependency has Example files in the default package
+    }
+
+    from {
+        getVersionFilePath(installerPlatform, jdk, "installer", "Dev")
+    }
+    { 
+        into 'version/'
+    }
+
+    
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+//fat jar with test sources in case you're running a single method
+task fatJarDevTest(type: Jar, dependsOn: [fatJarDev]) {
+    archivesBaseName = applicationName + "-patch";
+    manifest.from jar.manifest
+    archiveClassifier = 'desktop-test'
+    from {
+        zipTree(fatJarDev.archivePath)
+    }
+            {
+
+            }
+    from {
+        sourceSets.test.output
+    }{
+        
+    }
+}
+
+ext.javaMainClass = 'za.co.embrace.desktop.EmbraceDesktop'
+if (project.hasProperty("args")) {
+    ext.cmdargs = project.getProperty("args")
+} else {
+    ext.cmdargs = ""
+}
+
+//gradlew DesktopWindows:runAutoTask -Pargs="TEST.DEV manualGeneration manual1;manual2"
+//
+task runAutoTask(description: "This runs any program automatically with the given args. args: project task extraVaribles eg. runAutoTask -Pargs=\"TEST.DEV manualGeneration H,M**IV.OVERVIEW.MAN;H,M**CB.OVERVIEW.MAN\"", type: JavaExec) {
+    group = "Execution"
+    description = "Run the main class with JavaExecTask"
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = javaMainClass // Updated from mainClassName to mainClass
+    args cmdargs.split()
+    println("ARGS are:")
+    println(args)
+}
+task runHelpCrawl(type: JavaExec) {
+    cmdargs="TEST.DEV helpcrawl arg2"
+    group = "Execution"
+    description = "Run the main class with JavaExecTask"
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = javaMainClass
+    args cmdargs.split()
+    println("ARGS are:")
+    println(args)
+}
+
+//task runFatJar(type: JavaExec, dependsOn:fatJarDev/*, overwrite: true*/) {
+run {
+    dependsOn fatJarDev;
+    executable("${devJdk}/bin/java${jdkExtension}")
+    mainClass ='-jar'
+    //def ag = getCommandLineArgs()
+    //ag.add(0, fatJarDev.archivePath);
+
+    args fatJarDev.archivePath
+
+        doFirst {
+            enableAssertions = embraceEnableAssertions
+            logger.quiet("Enable assertions: " + enableAssertions)
+            println("Running jar in deployable common: " + args)
+            println("Main class: " + mainClass)
+            println(commandLine.toString())
+        }
+}
+
+application {
+
+    mainClassName = "-jar";
+}
+
+test {
+    //dependsOn fatJarDev;
+//    executable("${devJdk}/bin/java")
+//    def ag = getCommandLineArgs()
+//    ag.add(0, fatJarDev.archivePath);
+//
+//    args=ag
+//    enableAssertions = embraceEnableAssertions
+}
+
+/**
+ * When running in single mode, include test files.
+ */
+//task embraceRunSingle(type: JavaExec, dependsOn:fatJarDevTest, overwrite:true) {
+//    executable("${devJdk}/bin/java")
+//    main='-jar'
+//    def ag = getCommandLineArgs()
+//    ag.add(0, fatJarDevTest.archivePath);
+//
+//    args=ag
+//    enableAssertions = embraceEnableAssertions
+//
+//    doFirst {
+//        jvmArgs(getEmbraceJVMOptions(runWithDevOptions))
+//        jvmArgs(getEmbraceJVMProperties(runWithDevOptions))
+//        def mods = configurations.providedModule
+//        if (mods.size() > 0) {
+//            jvmArgs +=[
+//            "--module-path="+mods.asPath
+//            ]
+//        }
+//        println("Run with args: " + jvmArgs)
+//        logger.quiet(jvmArgs.toString())
+//        logger.quiet(commandLine.toString())
+//    }
+//}
+
+task simpleJar(type: Jar) {
+    manifest.from jar.manifest
+    outputs.upToDateWhen { false }
+}
+
+task installerJar(type: Jar) {
+    manifest.from jar.manifest
+    outputs.upToDateWhen { false }
+}
+
+//debug {
+//    dependsOn fatJarDev;
+//    main='-jar'
+//    executable("${devJdk}/bin/java")
+//    def ag = getCommandLineArgs()
+//    ag.add(0, fatJarDev.archivePath);
+//
+//    args=ag
+//    debug=true
+//    enableAssertions = embraceEnableAssertions
+//    updateDebugTaskArgs()
+//    doFirst {
+//        jvmArgs(getEmbraceJVMOptionsDebug())
+//        jvmArgs(getEmbraceJVMPropertiesDebug())
+//        def mods = configurations.providedModule
+//        if (mods.size() > 0) {
+//            jvmArgs +=[
+//            "--module-path="+mods.asPath
+//            ]
+//        }
+//        logger.quiet(jvmArgs.toString())
+//        logger.quiet(commandLine.toString())
+//    }
+//}
+
+//task debugFatJar(type: JavaExec, dependsOn: fatJarDev/*, overwrite:true */) {
+//
+//}
+
+
+task embraceDebugSingle(type: JavaExec, dependsOn: fatJarDev) {
+
+    mainClass='-jar'
+    executable("${devJdk}/bin/java${jdkExtension}")
+    def ag = getCommandLineArgs()
+    ag.add(0, fatJarDev.archivePath);
+
+    args=ag
+    debug=true
+    enableAssertions = embraceEnableAssertions
+    updateDebugTaskArgs()
+    doFirst {
+        jvmArgs(getEmbraceJVMOptionsDebug())
+        jvmArgs(getEmbraceJVMPropertiesDebug())
+        def mods = configurations.providedModule
+        final FileCollection javaFXPlatformJars = configurations.providedModule.filter{it.getName().endsWith("-${plat}.jar")}
+        if (javaFXPlatformJars.size() > 0) {
+            jvmArgs +=[
+            "--module-path="+javaFXPlatformJars.asPath
+            ]
+        }
+        logger.quiet(jvmArgs.toString())
+        logger.quiet(commandLine.toString())
+    }
+}
+
+
+task javaFXPatch(type: Jar, dependsOn: patch) {
+    archivesBaseName = applicationName+ "-patch";
+    manifest.from jar.manifest
+    archiveClassifier = ''
+    from {
+        zipTree(patch.archivePath)
+    } {
+        exclude 'version/version.xml'
+    }
+    from {
+        getVersionFilePath("all", jdk, "patch", "")
+    }
+    { 
+        into 'version/'
+    }
+    doLast {
+        signJar(javaFXPatch.archivePath)
+        def fName = getAppName("patch");
+        copy {
+            from javaFXPatch.archivePath
+            into "${project.projectDir.absolutePath}/deploy/artifacts"
+            rename { String fileName ->
+                fileName = "${fName}.jar"
+            }
+        }
+    }
+}
+task javaFXPatchDev(dependsOn: patch) {
+    doLast {
+        signJar(patch.archivePath)
+        def fName = getAppName("patch-dev");
+        copy {
+            from patch.archivePath
+            into "${project.projectDir.absolutePath}/deploy/artifacts"
+            rename { String fileName ->
+                fileName = "${fName}.jar"
+            }
+        }
+    }
+}
+
+task javaFXInstaller (dependsOn: [fatJarDev, clean]) {
+    def platform = installerPlatform
+    doFirst {
+        String mainJar = copyArtifacts("${buildDir.getAbsolutePath()}${File.separator}installer-files", platform, false)
+        platformImage("${buildDir.getAbsolutePath()}${File.separator}installer-files",platform, false, mainJar)
+    }
+}
+
+task javaFXInstallerDev (dependsOn: [fatJarDev, clean]) {
+    def platform = installerPlatform
+    doFirst {
+        String mainJar = copyArtifacts("${buildDir.getAbsolutePath()}${File.separator}installer-files", platform, true)
+        platformImage("${buildDir.name}${File.separator}installer-files", platform, true, mainJar)
+    }
+}
+
+

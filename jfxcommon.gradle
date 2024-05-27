@@ -1,0 +1,91 @@
+import org.gradle.api.tasks.JavaExec
+import org.gradle.api.tasks.testing.Test
+import org.apache.tools.ant.taskdefs.condition.Os
+
+//
+// This file is to be applied to every javafx based subproject.
+//
+apply plugin: 'java'
+apply plugin: 'application'
+
+def currentOS = org.gradle.internal.os.OperatingSystem.current()
+def plat
+
+def ver = "21-ea+5" //make sure you change the version in desktopdesktop-base.gradle as well
+def verWeb = "19.0.2.1" //update the verWeb in desktopdesktop-base.gradle only
+if (currentOS.isWindows()) {
+    ver = "21-internal+"
+    //ver = "18-internal+"
+    plat = 'win'
+} else if (currentOS.isLinux()) {
+    plat = 'linux'
+} else if (currentOS.isMacOsX()) {
+    plat = 'mac'
+}
+
+//platform = 'linux'
+//ver = '11.0.1'
+repositories {
+    maven {
+        url "https://repo.repsy.io/mvn/deanwookey/jfxtest"
+    }
+}
+dependencies {
+    providedModule("org.openjfx:javafx-graphics:${ver}:${plat}") {
+        //for testing things are on the right thread
+//        version {
+//            strictly "18-internal+0-2022-10-21-093422"
+//        }
+//         changing true
+    }
+    providedModule("org.openjfx:javafx-base:${ver}") {
+
+//        version {
+//            strictly "18-internal+0-2022-10-21-093422"
+//        }
+//        changing true
+    }
+    providedModule("org.openjfx:javafx-base:${ver}:${plat}")
+            {
+//                version {
+//                    strictly "18-internal+0-2022-10-21-093422"
+//                }
+//                changing true
+            }
+
+    providedModule("org.openjfx:javafx-controls:${ver}:${plat}") {
+//        version {
+//            strictly "18-internal+0-2022-10-21-093422"
+//        }
+//        changing true
+    }
+    providedModule "org.openjfx:javafx-fxml:${ver}:${plat}"
+    providedModule "org.openjfx:javafx-swing:${ver}:${plat}"
+
+
+    testImplementation "org.testfx:openjfx-monocle:jdk-12.0.1+2" // For Java 11
+    //    testCompile "org.testfx:openjfx-monocle:jdk-9+181" // For Java 9
+    //    testCompile "org.testfx:openjfx-monocle:8u76-b04" // For Java 8
+    implementation("com.gluonhq.attachextended:keyboard:4.0.14.9-CUSTOM") {
+        exclude group: "org.openjfx"
+    }
+
+    //base "com.gluonhq.attach:util:4.0.6"
+    //base "com.gluonhq.attach:keyboard:4.0.7-SNAPSHOT"
+    //base "com.gluonhq.attach:keyboard:4.0.7-SNAPSHOT:desktop"
+}
+
+tasks.withType(JavaExec) {
+    doFirst {
+        def mods = configurations.providedModule
+        //jvmArgs += "--add-modules"
+        //jvmArgs += "javafx.controls,javafx.fxml,javafx.swing,javafx.graphics,javafx.web"
+        final FileCollection javaFXPlatformJars = configurations.providedModule.filter { it.getName().endsWith("-${plat}.jar") }
+        if (javaFXPlatformJars.asPath != "") {
+            jvmArgs += [
+                    "--module-path",
+                    javaFXPlatformJars.asPath
+            ]
+        }
+    }
+}

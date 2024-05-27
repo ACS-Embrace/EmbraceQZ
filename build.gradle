@@ -1,0 +1,154 @@
+plugins {
+    id 'java'
+    id 'maven-publish'
+}
+//
+//group = 'za.co.embrace'
+//version = '1.0-SNAPSHOT'
+//
+repositories {
+    mavenCentral()
+}
+//
+//dependencies {
+//    testImplementation platform('org.junit:junit-bom:5.9.1')
+//    testImplementation 'org.junit.jupiter:junit-jupiter'
+//}
+//
+//test {
+//    useJUnitPlatform()
+//}
+
+ext {
+    mainClass = 'qz.ws.PrintSocketServer'
+    fullName = "QZ"
+    applicationName = 'QZ'
+    applicationVersion = '0.0.17'
+    applicationReleaseNotes = 'Initial version.'
+    embraceJvmOptionsProduction = ["-add-modules=javafx.graphics,javafx.controls,javafx.fxml","server", "Xmx25g"]
+    embraceJvmPropertiesProduction = ["java.net.preferIPv4Stack=true", "com.sun.net.ssl.enableECC=false","Log4jContextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector"]
+    embraceJvmOptionsDev = embraceJvmOptionsProduction
+    embraceJvmPropertiesDev = embraceJvmPropertiesProduction
+    runWithDevOptions = true
+    embraceEnableAssertions = true
+}
+
+apply from: rootProject.file('common.gradle')
+apply from: rootProject.file('jfxcommon.gradle')
+apply from: rootProject.file('deployablecommon.gradle')
+
+def currentOS = org.gradle.internal.os.OperatingSystem.current()
+def platform
+def ver = "16"
+def verWeb = "16"
+if (currentOS.isWindows()) {
+    platform = 'win'
+} else if (currentOS.isLinux()) {
+    verWeb = ver
+    platform = 'linux'
+} else if (currentOS.isMacOsX()) {
+    verWeb = ver
+    platform = 'mac'
+}
+
+dependencies {
+    providedModule "org.openjfx:javafx-web:${verWeb}:${platform}"
+
+    implementation fileTree(dir: 'lib', include: '*.jar')
+    implementation fileTree(dir: 'lib/websocket', include: '*.jar')
+    implementation fileTree(dir: 'lib/printing', include: '*.jar')
+    implementation fileTree(dir: 'lib/logging', include: '*.jar')
+    implementation fileTree(dir: 'lib/communication', include: '*.jar')
+    implementation fileTree(dir: 'lib/charsets', include: '*.jar')
+    // TODO: refactor this project to use log4j2, lots of occurrences in code.
+    implementation group: 'log4j', name: 'log4j', version: '1.2.17'
+    implementation group: 'log4j', name: 'apache-log4j-extras', version: '1.2.17'
+    implementation group: 'org.slf4j', name: 'slf4j-api', version: '1.7.30'
+    implementation group: 'org.slf4j', name: 'slf4j-log4j12', version: '1.7.30'
+
+    // Maven converted
+    implementation "org.eclipse.jetty:jetty-servlet:9.4.44.v20210927"
+    implementation "org.apache.logging.log4j:log4j-api:2.14.1"
+    implementation "org.apache.logging.log4j:log4j-core:2.14.1"
+    implementation "org.eclipse.jetty:jetty-io:9.4.44.v20210927"
+    implementation "org.eclipse.jetty.websocket:websocket-common:9.4.44.v20210927"
+    implementation "org.slf4j:slf4j-log4j12:1.7.30"
+    implementation "org.usb4java:usb4java-javax:1.3.0"
+    implementation "com.github.zafarkhaja:java-semver:0.9.0"
+    implementation "org.apache.commons:commons-pool2:2.9.0"
+    implementation "org.eclipse.jetty.websocket:websocket-server:9.4.44.v20210927"
+    implementation "org.codehaus.jettison:jettison:1.4.1"
+    implementation "commons-codec:commons-codec:1.15"
+    implementation "log4j:log4j:1.2.17"
+    implementation "org.slf4j:slf4j-api:1.7.30"
+    implementation "org.eclipse.jetty.websocket:websocket-servlet:9.4.44.v20210927"
+    implementation "org.eclipse.jetty:jetty-http:9.4.44.v20210927"
+    implementation "org.apache.commons:commons-lang3:3.12.0"
+    implementation 'org.eclipse.jetty.websocket:javax-websocket-server-impl:9.4.54.v20240208'
+    implementation "javax.servlet:javax.servlet-api:4.0.1"
+    implementation "org.usb4java:usb4java:1.3.0"
+    implementation "javax.websocket:javax.websocket-api:1.1"
+    implementation 'commons-io:commons-io:2.16.1'
+    implementation "org.eclipse.jetty:jetty-util:9.4.44.v20210927"
+    implementation "org.eclipse.jetty.websocket:websocket-client:9.4.44.v20210927"
+    implementation "org.eclipse.jetty:jetty-security:9.4.44.v20210927"
+    implementation 'org.apache.pdfbox:pdfbox:2.0.14'
+    implementation 'com.narupley:not-going-to-be-commons-ssl:0.3.20'
+
+
+
+    // end
+
+    implementation group: 'com.lmax', name: 'disruptor', version: '3.4.0'
+//    implementation project(":Core")
+//    implementation project(":ElementsFX")
+//    implementation group: 'org.eclipse.jetty', name: 'jetty-server', version: '9.4.21.v20190926'
+//    implementation group: 'org.eclipse.jetty', name: 'jetty-client', version: '9.4.21.v20190926'
+//    implementation group: 'org.eclipse.jetty', name: 'jetty-servlet', version: '9.4.21.v20190926'
+
+//    implementation files('../libs/undertow-core-2.3.11.Final-SNAPSHOT.jar')
+    implementation 'io.undertow:undertow-core:2.3.11.Final'
+//    implementation files('../libs/undertow-servlet-2.3.11.Final-SNAPSHOT.jar')
+    implementation 'io.undertow:undertow-servlet:2.3.11.Final'
+
+
+//    implementation group: 'org.apache.pdfbox', name: 'pdfbox-app', version: '2.0.14'
+
+    implementation group: 'org.jboss.xnio', name: 'xnio-api', version: '3.8.12.Final'
+
+    implementation(group: "com.github.java-json-tools", name: "json-schema-validator", version: "2.2.10");
+
+    implementation group: 'net.java.dev.jna', name: 'jna', version: '5.7.0'
+    implementation group: 'net.java.dev.jna', name: 'jna-platform', version: '5.7.0'
+
+    implementation fileTree(dir: '/lib', include: '*.jar')
+    implementation fileTree(dir: '/lib/websocket', include: '*.jar')
+    implementation fileTree(dir: '/lib/printing', include: '*.jar')
+    implementation fileTree(dir: '/lib/logging', include: '*.jar')
+    implementation fileTree(dir: '/lib/communication', include: '*.jar')
+    implementation fileTree(dir: '/lib/charsets', include: '*.jar')
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            from components.java
+        }
+
+
+    }
+
+    repositories {
+        maven {
+            url = 'https://repo.repsy.io/mvn/devops_embrace/qz'
+            credentials {
+                username repsyUsername
+                password repsyPassword
+            }
+        }
+    }
+}
+
+mainClassName = project.ext.get('mainClass')
+
+

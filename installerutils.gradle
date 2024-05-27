@@ -1,0 +1,919 @@
+/**
+ * Copies the installer artifacts to the destination folder
+ *
+ * */
+String copyArtifacts(String destination, String platform, boolean dev) {
+    configurations.providedModule.each { File file ->
+        println("Copying module ${file.name} to " + destination)
+        logger.quiet("Copying module ${file.name} to " + destination)
+        copy {
+            from file
+            into destination
+        }
+    }
+    def extension = ""
+    if (dev) {
+        extension = "Dev"
+    }
+    copy {
+        from {
+            zipTree(fatJarDev.archivePath)
+        }
+                {
+                    exclude 'version/version.xml'
+                    exclude 'META-INF/license/' //exclude the licence folder which is a pain because a licence file exists already
+                }
+        from {
+            getVersionFilePath(platform, jdk, "installer", extension)
+        }
+                {
+                    into 'version/'
+                }
+        into "${buildDir.getAbsolutePath()}${File.separator}tmp${File.separator}simplejar"
+    }
+    File archivePath = new File(destination + "/" + applicationName + ".jar")
+
+    ant.zip(destfile: archivePath.getAbsolutePath()) {
+        fileset(dir: "${buildDir.getAbsolutePath()}${File.separator}tmp${File.separator}simplejar") {
+        }
+    }
+    signJar(archivePath)
+    return archivePath.getName()
+}
+
+public void platformImage(String inputFolder, String platform, boolean dev, String mainJar) {
+    if (jdk != null && !jdk.isEmpty()) {
+        String enableAssertions = ""
+        String extension = ""
+        if (dev) {
+            enableAssertions = "-ea"
+            extension = "dev"
+        }
+        String destination = "${project.projectDir.absolutePath}${File.separator}deploy${File.separator}${platform}${extension}${File.separator}bundle";
+        file(destination).list().each {
+            f -> delete "$destination/${f}"
+        }
+        //bundle
+        String packageType = "app-image"
+        String modulePath = "\$APPDIR"
+        String icon = "deploy/icon.ico"
+        def javafxpackager;
+        if (platform.contains("mac")) {
+            packageType = "pkg";
+            icon = "deploy/icon.icns";
+            javafxpackager = exec {
+                environment "JAVA_HOME", "${jdk}" //why oh why...
+                workingDir "${project.projectDir.absolutePath}"
+                commandLine "${jdk}/bin/jpackage",
+                        "--type", packageType,
+                        "--input", inputFolder,
+                        "--dest", destination,
+                        "--name", "${applicationName}",
+                        "--main-class", "${mainClass}",
+                        "--main-jar", mainJar,
+                        "--icon", icon,
+                        "--app-version", "${applicationVersion}",
+                        "--vendor", "ACS-Embrace",
+                        // don't specify --add-modules, will override and prevent default module extraction for runtime generation
+                        "--verbose",
+                        "--mac-sign",
+                        "--mac-signing-key-user-name","Associated Computer Solutions Pty Ltd (6HJK32YW76)",
+                        "--mac-signing-keychain","${keychain_path}",
+                        "--java-options",
+                        "\"--module-path=" + modulePath + "\"",
+                        "--java-options", (enableAssertions + " " + getPackagerProperties() + getPackagerOptions()).trim()
+
+
+                logger.quiet(commandLine.toString())
+            }
+
+
+        } else {
+            javafxpackager = exec {
+                environment "JAVA_HOME", "${jdk}" //why oh why...
+                workingDir "${project.projectDir.absolutePath}"
+                commandLine "${jdk}/bin/jpackage",
+                        "--type", packageType,
+                        "--input", inputFolder,
+                        "--dest", destination,
+                        "--name", "${applicationName}",
+                        "--main-class", "${mainClass}",
+                        "--main-jar", mainJar,
+                        "--icon", icon,
+                        "--app-version", "${applicationVersion}",
+                        "--vendor", "ACS-Embrace",
+                        // don't specify --add-modules, will override and prevent default module extraction for runtime generation
+                        "--verbose",
+                        "--java-options",
+                        "\"--module-path=" + modulePath + "\"",
+                        "--java-options", (enableAssertions + " " + getPackagerProperties() + getPackagerOptions()).trim()
+
+                //NB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                //to debug, run with --win-console option!
+
+
+                //            commandLine "${jdk}/bin/jpackager",
+                //                "create-image",
+                //                "--input",inputFolder,
+                //                "--output","${project.projectDir.absolutePath}${File.separator}deploy${File.separator}${platform}${extension}${File.separator}bundle",
+                //                "--name",  "${applicationName}",
+                //                "--class", "${mainClass}",
+                //                "--main-jar", mainJar,
+                //                "--icon", "deploy/icon.ico",
+                //                "--version","${applicationVersion}",
+                //                "--vendor", "ACS-Embrace",
+                //                "--add-modules", "jdk.unsupported.desktop", //specifically add this module to the runtime because the new swing needs it
+                //                "--verbose",
+                //                "--jvm-args", (enableAssertions + " --module-path=. " + getPackagerProperties() + getPackagerOptions()).trim()
+                logger.quiet(commandLine.toString())
+                //            doLast {
+                //                if (execResult != 0) {
+                //                    throw new GradleException("Error in packaging")
+                //                }
+                //            }
+            }
+        }
+
+        if (platform.contains("linux")) {
+            packageType = "deb";
+        }
+
+        if (platform.contains("win")) {
+            removeInvalidOptions(destination);
+        } //removes 2 lines that jpackage adds after 15.0.2 which break the installer
+
+        //make executable
+        logger.quiet("Building executable")
+        buildDistributable(platform, platform, dev);
+        File file = new File("${project.projectDir.absolutePath}/deploy/${platform}service/MakeInstaller.iss");
+        logger.quiet("Checking for service installer files")
+        if (file.exists()) {
+            logger.quiet("Building service installer")
+            String serviceDestination = "${project.projectDir.absolutePath}${File.separator}deploy${File.separator}${platform}service${File.separator}bundle";
+            logger.quiet("Service bundle " + serviceDestination)
+            File serviceBundle = new File(serviceDestination)
+            serviceBundle.mkdirs()
+            serviceBundle.list().each {
+                f -> delete "$serviceDestination/${f}"
+            }
+
+            copy {
+                from destination
+                into serviceDestination
+            }
+            buildDistributable(platform, platform + "service", dev); //try and build a service version
+        }
+
+
+    }
+}
+
+void removeInvalidOptions(String destination) {
+    File configFile = new File(destination + "/${applicationName}/app/${applicationName}.cfg")
+    def lines = configFile.readLines()
+    BufferedWriter w = configFile.newWriter()
+    for (String line : lines) {
+        if (!line.equals("java-options=--module-path") && !line.equals("java-options=\$APPDIR\\mods")) {
+            w.write(line)
+        }
+        w.newLine()
+    }
+    w.close()
+}
+
+void buildDistributable(String platform, String folder, boolean dev) {
+    println("Building distributable");
+    String extension = "";
+    if (dev) {
+        folder = folder + "dev";
+        extension = "Dev";
+    }
+    println("output folder " + folder)
+    String appDesc = ""
+    String appName = ""
+    String ext = ""
+    if (platform.contains("win")) {
+        ext = ".exe";
+        appDesc = "windows-x64"
+        if (dev) {
+            appDesc = appDesc + "-dev"
+        }
+        if (folder.contains("service")) {
+            appDesc = appDesc + "-service";
+        }
+        fileTree("${project.projectDir.absolutePath}/deploy/${folder}/").matching {
+            include "MakeInstaller*"
+        }.each { File it ->
+            println("Running " + it.getName())
+            // do some operations
+            String[] split = it.getName().replace(".iss", "").split("-");
+            String client = "";
+            if (split.length > 1) {
+                client = "-" + split[1];
+            }
+            appName = getAppName(appDesc) + client + ext
+            println("App name: " + appName)
+            setIssVersionAndName(it.getAbsolutePath(), getAppName(appDesc) + client) //no ext on this
+            println("Iss version has been set")
+            String issFileName = it.getName();
+            def runInno = exec {
+                workingDir "${project.projectDir.absolutePath}/deploy/${folder}"
+                //commandLine "Compil32", "/cc", "MakeInstaller.iss"
+                println(issFileName)
+                if (project.hasProperty('Compil32Path')) {
+                    println("compil32 " + Compil32Path)
+                    commandLine Compil32Path, "/cc", issFileName
+                } else {
+                    println("no compil32 specified")
+                    commandLine "compil32", "/cc", issFileName
+                }
+
+                println(commandLine.toString())
+            }
+            println("Built " + it.getName())
+            copy{
+                from "${project.projectDir.absolutePath}/deploy/${folder}/Output/${appName}"
+                into "${project.projectDir.absolutePath}/deploy/artifacts"
+            }
+        }
+        appName = getAppName(appDesc) + ext //without the client part
+
+    } else if (platform.contains("mac")) {
+        ext = ".pkg";
+        appDesc = "macos-x64"
+        if (dev) {
+            appDesc = appDesc + "-dev"
+        }
+        appName = getAppName(appDesc) + ext
+
+        // on macOS, move and rename the generated .pkg to match our convention
+
+        String generatedFile = "${applicationName}-${applicationVersion}" + ext
+        String desiredName = getAppName(appDesc) + ext
+        String prefixPath = "${project.projectDir.absolutePath}/deploy/${folder}"
+        copy {
+            from "${prefixPath}/bundle/${generatedFile}"
+            into "${prefixPath}/Output"
+        }
+        file("${prefixPath}/Output/${generatedFile}").renameTo(file("${prefixPath}/Output/${desiredName}"))
+
+    } else if (platform.contains("linux")){
+        ext = "-1_amd64.deb";
+        appDesc = "linux-x64"
+        if (dev) {
+            appDesc = appDesc + "-dev"
+        }
+        appName = getAppName(appDesc) + ext
+
+        //move and rename the generated .deb to match our convention
+
+        String generatedFile = ("${applicationName}").toLowerCase()+"_${applicationVersion}" + ext
+        String desiredName = getAppName(appDesc) + ext
+        String prefixPath = "${project.projectDir.absolutePath}/deploy/${folder}"
+        copy {
+            from "${prefixPath}/bundle/${generatedFile}"
+            into "${prefixPath}/Output"
+        }
+        file("${prefixPath}/Output/${generatedFile}").renameTo(file("${prefixPath}/Output/${desiredName}"))
+
+    }
+
+    copy{
+        from "${project.projectDir.absolutePath}/deploy/${folder}/Output/${appName}"
+        into "${project.projectDir.absolutePath}/deploy/artifacts"
+    }
+
+    //copy it to the artifacts folder
+    copy {
+        from "${project.projectDir.absolutePath}/deploy/${folder}/Output/${appName}"
+        into "${project.projectDir.absolutePath}/deploy/artifacts"
+    }
+
+    def archName = getAppName("${appDesc}-installer") + ".jar"
+    def outPath = "${project.projectDir.absolutePath}/deploy/${folder}/Output/"
+    copy {
+        from {
+            getVersionFilePath(platform, jdk, "installer", extension)
+        }
+        from {
+            "${project.projectDir.absolutePath}/deploy/${folder}/Output/${appName}"
+        } {
+            into "installer/"
+        }
+        into "${buildDir.getAbsolutePath()}${File.separator}tmp${File.separator}installerjar"
+    }
+    String installerJar = outPath + archName
+    File archivePath = new File(installerJar)
+
+    ant.zip(destfile: archivePath.getAbsolutePath()) {
+        fileset(dir: "${buildDir.getAbsolutePath()}${File.separator}tmp${File.separator}installerjar") {
+        }
+    }
+
+
+    signJar(archivePath)
+    copy {
+        from outPath + archName
+        into "${project.projectDir.absolutePath}/deploy/artifacts"
+    }
+    delete {
+        delete(outPath + archName)
+        delete(outPath + appName)
+    }
+}
+
+//task javaFXInstallerDev (dependsOn: fatJarDev) {
+//    doFirst {
+//        configurations.providedModule.each { File file ->
+//            logger.quiet("Copying module ${file.name} to libs dir")
+//            copy {
+//                from file
+//                into "${buildDir.name}${File.separator}${libsDir.name}"
+//            }
+//        }
+//        signJar(fatJarDev.archivePath)
+//        if (jdk != null && !jdk.isEmpty()) {
+//            def javafxpackager = exec {
+//                environment "JAVA_HOME", "${jdk}" //why oh why...
+//                workingDir "${project.projectDir.absolutePath}"
+//                commandLine "${jdk}/bin/jpackager",
+//                "create-image",
+//                "--input","${buildDir.name}${File.separator}${libsDir.name}",
+//                "--output","${project.projectDir.absolutePath}${File.separator}deploy${File.separator}win64dev${File.separator}bundle",
+//                "--name",  "${applicationName}",
+//                "--class", "${mainClass}",
+//                //"--module", "ALL-UNNAMED",
+//                //"--add-modules", "java.xml",
+//                "--main-jar", fatJarDev.archiveName,
+//                "--icon", "deploy/icon.ico",
+//                "--version","${applicationVersion}",
+//                "--vendor", "ACS-Embrace", 
+//                "--verbose",
+//                "--jvm-args", ("-ea --module-path=. " + getPackagerProperties() + getPackagerOptions()).trim()
+//
+//
+//                //args(getBundleProperties())
+//                //args(getBundleOptions())
+//                logger.quiet(commandLine.toString())
+//                //logger.quiet(commandLine.toString())
+//            }
+//
+//            //make executable
+//            setIssVersionAndName("${project.projectDir.absolutePath}/deploy/win64dev/MakeInstaller.iss", getAppName("windows-x64-dev"))
+//            def runInno = exec {
+//                workingDir "${project.projectDir.absolutePath}/deploy/win64dev"
+//                commandLine "compil32", "/cc", "MakeInstaller.iss"
+//                logger.quiet(commandLine.toString())
+//            }
+//            //copy it to the artifacts folder
+//            def appName = getAppName("windows-x64-dev") + ".exe"
+//            copy {
+//                from "${project.projectDir.absolutePath}/deploy/win64dev/Output/${appName}"
+//                into "${project.projectDir.absolutePath}/deploy/artifacts"
+//            }
+//            
+//            def archName = getAppName("windows-x64-dev-installer") + ".jar"
+//            def outPath = "${project.projectDir.absolutePath}/deploy/win64dev/Output/"
+//            
+//            def result = simpleJar {
+//                baseName = archName
+//                archivesBaseName = archName
+//                archiveName = archName
+//                destinationDir = new File(outPath)
+//                from "${project.projectDir.absolutePath}${File.separator}src${File.separator}main${File.separator}resources${File.separator}version${File.separator}"
+//                from {
+//                    "${project.projectDir.absolutePath}/deploy/win64dev/Output/${appName}" 
+//                }{
+//                    into "installer/"
+//                }
+//            }
+//            result.execute()
+//            signJar(new File(outPath + archName))
+//            copy {
+//                from outPath + archName
+//                into "${project.projectDir.absolutePath}/deploy/artifacts"
+//            }
+//            delete {
+//                delete(outPath + archName)
+//                delete(outPath + appName)
+//            }
+//            
+//        }
+//    }
+//}
+
+
+String getAppName(String operatingSystem) {
+    def fName = fullName.toLowerCase();
+    fName = fName.replace(" ", "_")
+    fName = fName.replace("-", "")
+    fName = fName + "-" + applicationVersion.replace(".", "_")
+    fName = fName + "-" + operatingSystem
+    return fName
+}
+
+defineProperty("embrace_key", "unknown")
+
+void signJar(File jarPath) {
+    File jarFile = jarPath
+    String dir = jarFile.getParent()
+    String keystoreKey = System.getenv('EMBRACE_KEY');
+    if (keystoreKey == null) {
+        keystoreKey = project.ext.embrace_key;
+    }
+    def javafxpackager = exec {
+        workingDir "${project.projectDir.absolutePath}"
+        commandLine "${jdk}/bin/jarsigner",
+                "-keypass", keystoreKey,
+                "-keystore", "${rootProject.projectDir.absolutePath}/InstallerFiles/embrace-ca-signed-private-key.p12",
+                "-storepass", keystoreKey, jarPath, "selfsigned"
+        logger.quiet(commandLine.toString())
+    }
+}
+
+void setIssVersionAndName(def issFilePath, def fileName) {
+    def lines = new File(issFilePath).readLines()
+    BufferedWriter w = (new File(issFilePath)).newWriter()
+    for (String line : lines) {
+        if (line.contains("#define MyAppVersion \"")) {
+            w.write("#define MyAppVersion \"" + applicationVersion + "\" ;this line is populated automatically, don't remove it")
+        } else if (line.contains("OutputBaseFilename=")) {
+            w.write("OutputBaseFilename=${fileName}")
+        } else {
+            w.write(line)
+        }
+        w.newLine()
+    }
+    w.close()
+
+}
+
+public List<String> getCommandLineArgs() {
+    def cmdLineArgs = Project.hasProperty('cmdLineArgs') ? Project.cmdLineArgs : ''
+    cmdLineArgs = cmdLineArgs?.toString()?.trim()
+    if (cmdLineArgs == null || cmdLineArgs == '') {
+        return []
+    } else {
+        return splitArgs(cmdLineArgs)
+    }
+}
+
+void updateDebugTaskArgs() {
+    List debuggerAttachArgs = null;
+    if (Project.hasProperty('debuggerJpdaPort')) {
+        def debuggerPort = project.debuggerJpdaPort
+        debuggerAttachArgs = ['-Xdebug', "-Xrunjdwp:transport=dt_socket,server=n,address=${debuggerPort}".toString()]
+    }
+
+    if (debuggerAttachArgs == null || !Project.hasProperty('debuggedTaskName')) {
+        return
+    }
+
+    String debuggedTaskName = Project.debuggedTaskName.toString()
+    String localTaskName = debuggedTaskName
+
+    int projectPathSepIndex = debuggedTaskName.lastIndexOf(':')
+    if (projectPathSepIndex >= 0) {
+        String projectPath = normalizePath(debuggedTaskName.substring(0, projectPathSepIndex).trim())
+        if (projectPath != project.path) {
+            return
+        }
+
+        localTaskName = debuggedTaskName.substring(projectPathSepIndex + 1).trim()
+    }
+
+    def task = Project.tasks.findByName(localTaskName)
+    if (task instanceof JavaExec) {
+        def cmdLineArgs = getCmdLineArgs(project)
+        if (!cmdLineArgs.isEmpty()) {
+            task.args = cmdLineArgs
+        }
+    }
+    if ((task instanceof JavaExec) || (task instanceof Test)) {
+        updateJvmArgs(task, debuggerAttachArgs)
+    }
+}
+
+String normalizePath(String rawPath) {
+    boolean changed = false
+
+    StringBuilder result = new StringBuilder(rawPath.length())
+    if (!rawPath.startsWith(':')) {
+        result.append(':')
+        changed = true
+    }
+
+    boolean prevColon = false
+    for (int i = 0; i < rawPath.length(); i++) {
+        char ch = rawPath.getAt(i)
+        boolean colon = ch == ':'
+        if (!colon || !prevColon) {
+            result.append(ch)
+        } else {
+            changed = true
+        }
+        prevColon = colon
+    }
+
+    return changed ? result.toString() : rawPath
+}
+
+List<String> getEmbraceJVMOptions(boolean dev) {
+    List<String> props = embraceJvmOptionsProduction
+    if (dev) {
+        props = embraceJvmOptionsDev
+    }
+    List<String> ret = new ArrayList<>();
+    for (String prop : props) {
+        ret.add("-" + prop)
+    }
+    return ret
+}
+
+List<String> getEmbraceJVMProperties(boolean dev) {
+    List<String> props = embraceJvmPropertiesProduction
+    if (dev) {
+        props = embraceJvmPropertiesDev
+    }
+    List<String> ret = new ArrayList<>();
+    for (String prop : props) {
+        ret.add("-D" + prop)
+    }
+
+    return ret
+}
+
+List<String> getEmbraceJVMOptionsDebug() {
+    List<String> props = embraceJvmOptionsDebug
+    List<String> ret = new ArrayList<>();
+    for (String prop : props) {
+        ret.add("-" + prop)
+    }
+    return ret
+}
+
+List<String> getEmbraceJVMPropertiesDebug() {
+    List<String> props = embraceJvmPropertiesDebug
+    List<String> ret = new ArrayList<>();
+    for (String prop : props) {
+        ret.add("-D" + prop)
+    }
+    return ret
+}
+
+String getPackagerProperties() {
+    String ret = "";
+    List<String> props = project.ext.embraceJvmPropertiesProduction
+    for (String prop : props) {
+        ret += "-D" + prop + " ";
+    }
+    return ret;
+}
+
+String getPackagerOptions() {
+    List<String> props = project.ext.embraceJvmOptionsProduction
+    String ret = "";
+    for (String prop : props) {
+        ret += "-" + prop + " ";
+    }
+    return ret;
+}
+
+String getVersionFile(def platform, def jdk, def type, def programNameExtension) {
+    String jdkVersion = getJDKVersion(jdk)
+    String programNameExtension2 = programNameExtension
+    if (!programNameExtension.equals("")) {
+        programNameExtension2 = " " + programNameExtension
+    }
+    return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n" +
+            "<root>\n" +
+            "    <version>${applicationVersion}</version>\n" +
+            "    <runtimeversion>${jdkVersion}</runtimeversion>\n" +
+            "    <appname>${fullName + programNameExtension2}</appname>\n" +
+            "    <shortname>${applicationName + programNameExtension}</shortname>\n" +
+            "    <operatingsystem>${platform}</operatingsystem>\n" +
+            "    <releasenotes>${groovy.xml.XmlUtil.escapeXml(applicationReleaseNotes)}</releasenotes>\n" +
+            "    <type>${type}</type>\n" +
+            "</root>\n"
+}
+
+void updateVersionFile(def operatingSystem, def jdk, def type) {
+    updateVersionFile(operatingSystem, jdk, type, "")
+}
+
+File getVersionFilePath(def operatingSystem, def jdk, def type, def programNameExtension) {
+    updateVersionFile(operatingSystem, jdk, type, programNameExtension)
+    return getVersionFilePath()
+}
+
+File getVersionFilePath() {
+    File versionFile = new File("${project.projectDir.absolutePath}${File.separator}src${File.separator}main${File.separator}resources${File.separator}version${File.separator}version.xml")
+    return versionFile
+}
+
+void updateVersionFile(def operatingSystem, def jdk, def type, def programNameExtension) {
+    String versionF = getVersionFile(operatingSystem, jdk, type, programNameExtension)
+    File versionFile = new File("${project.projectDir.absolutePath}${File.separator}src${File.separator}main${File.separator}resources${File.separator}version${File.separator}version.xml")
+    versionFile.getParentFile().mkdirs()
+    versionFile.write(versionF)
+}
+
+void deleteVersionFiles() {
+    println "test delete version files"
+    rootProject.subprojects.each {
+        File f = new File(it.projectDir)
+        println f.toString()
+    }
+}
+
+String getJDKVersion(def pathToJDK) {
+    ByteArrayOutputStream output = new ByteArrayOutputStream()
+    def ver = exec {
+        workingDir "${project.projectDir.absolutePath}"
+        commandLine "${pathToJDK}/bin/java",
+                "-version"
+        errorOutput = output
+    }
+
+    String out = output.toString().split("[\\s\"]+")[2]
+    out = out.replace("0_", "")
+    return out
+}
+
+void updateJvmArgs(def task, List additionalArgs) {
+    logger.quiet("updating jvm args")
+    // Note: The list might contain non-string instances, so first convert them.
+    Set additionalArgsSet = new LinkedHashSet(additionalArgs*.toString())
+    List currentArgs = task.jvmArgs;
+    for (def arg : task.jvmArgs) {
+        additionalArgsSet.remove(arg?.toString())
+    }
+    task.jvmArgs(additionalArgsSet)
+    logger.quiet("Final args " + task.jvmArgs.toString())
+}
+
+List<String> splitArgs(String cmdLine) {
+    char quoteChar = '"'
+    List<String> result = new ArrayList<>();
+    int index = indexOfNonWs(cmdLine, 0);
+    while (index < cmdLine.length()) {
+        if (cmdLine.charAt(index) == quoteChar) {
+            int argStartIndex = index + 1;
+            index = unescapedIndexOf(cmdLine, argStartIndex, quoteChar);
+
+            int argEndIndex;
+            if (index < 0) {
+                index = cmdLine.length();
+                argEndIndex = index;
+            } else {
+                argEndIndex = index;
+                index++;
+            }
+
+            result.add(unescapeString(cmdLine.substring(argStartIndex, argEndIndex)));
+        } else {
+            int argStartIndex = index;
+            index = indexOfWs(cmdLine, index);
+            result.add(cmdLine.substring(argStartIndex, index));
+        }
+
+        index = indexOfNonWs(cmdLine, index);
+    }
+    return result;
+}
+
+int indexOfNonWs(String str, int startIndex) {
+    return indexOfWs(str, startIndex, false);
+}
+
+int indexOfWs(String str, int startIndex) {
+    return indexOfWs(str, startIndex, true);
+}
+
+int indexOfWs(String str, int startIndex, boolean findWs) {
+    char spaceChar = ' '
+    for (int i = startIndex; i < str.length(); i++) {
+        if ((str.charAt(i) <= spaceChar) == findWs) {
+            return i;
+        }
+    }
+    return str.length();
+}
+
+int unescapedIndexOf(String str, int startIndex, char toFind) {
+    char escapeChar = '\\'
+    int i = startIndex;
+    while (i < str.length()) {
+        char ch = str.charAt(i);
+        if (ch == toFind) {
+            return i;
+        }
+
+        if (ch == escapeChar) i += 2;
+        else i++;
+    }
+    return -1;
+}
+
+String unescapeString(String str) {
+    char escapeChar = '\\'
+    StringBuilder result = new StringBuilder(str.length());
+    int i = 0;
+    while (i < str.length()) {
+        char ch = str.charAt(i);
+        if (ch == escapeChar) {
+            if (i + 1 < str.length()) {
+                result.append(str.charAt(i + 1));
+                i += 2;
+                continue;
+            }
+        }
+
+        result.append(ch);
+        i++;
+    }
+    return result.toString();
+}
+
+abstract class DuplicateFileManager {
+    abstract public void resolveDuplicates(File destination, File mainFile, List<File> duplicates);
+
+    /**
+     * Reads the contents of the given file into the stringbuilder.
+     */
+    public void readFile(StringBuilder sb, File f) {
+        BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(f)));
+        def chars = new char[1024];
+        int r = 0;
+        while ((r = reader.read(chars, 0, chars.length)) != -1) {
+            sb.append(chars, 0, r);
+        }
+        reader.close();
+    }
+}
+
+class ConcatenateDuplicates extends DuplicateFileManager {
+    public void resolveDuplicates(File destination, File mainFile, List<File> duplicates) {
+        StringBuilder sb = new StringBuilder();
+        if (mainFile != null) {
+            readFile(sb, mainFile);
+        }
+        for (File f : duplicates) {
+            readFile(sb, f);
+        }
+        destination.getParentFile().mkdirs();
+        destination.write(sb.toString());
+    }
+}
+
+class PickMain extends DuplicateFileManager {
+    public void resolveDuplicates(File destination, File mainFile, List<File> duplicates) {
+        if (mainFile != null) {
+            destination.getParentFile().mkdirs();
+            java.nio.file.Files.copy(mainFile.toPath(), destination.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+}
+
+class Log4j2Concatenator extends DuplicateFileManager {
+
+    /**
+     * Log4j2Plugins.dat merge based off https://gist.github.com/riccardobl/bdbbae9f2e8fefcd28dc5482ddc6b374
+     */
+    public void resolveDuplicates(File destination, File mainFile, List<File> duplicates) {
+        def globalCount = 0;
+        def writer = new ByteArrayOutputStream();
+        if (mainFile != null) {
+            duplicates.add(mainFile);
+        }
+        for (File f : duplicates) {
+            if (f != null && f.exists()) {
+                def individualPluginWriter = new DataOutputStream(writer);
+                def reader = new DataInputStream(new BufferedInputStream(new FileInputStream(f)));
+                def count = reader.readInt();
+                globalCount += count;
+                println("Merge $count entries");
+                for (def k = 0; k < count; k++) {
+                    individualPluginWriter.writeUTF(reader.readUTF());
+                    def entries = reader.readInt();
+                    individualPluginWriter.writeInt(entries);
+                    for (def j = 0; j < entries; j++) {
+                        individualPluginWriter.writeUTF(reader.readUTF());
+                        individualPluginWriter.writeUTF(reader.readUTF());
+                        individualPluginWriter.writeUTF(reader.readUTF());
+                        individualPluginWriter.writeBoolean(reader.readBoolean());
+                        individualPluginWriter.writeBoolean(reader.readBoolean());
+                    }
+                }
+                reader.close()
+                individualPluginWriter.flush();
+            }
+        }
+
+        def bytes = writer.toByteArray();
+        writer.close();
+        destination.getParentFile().mkdirs();
+        writer = new DataOutputStream(new FileOutputStream(destination));
+        writer.writeInt(globalCount);
+        writer.write(bytes);
+        writer.close();
+    }
+}
+
+/**
+ * Takes a list of dependencies (jars and folders), finds duplicate files in those folders, merges them appropriately, writes them all into one jar and returns that jar.
+ *
+ */
+List<File> getMergedDuplicates(def input) {
+    File root = new File("$buildDir/merged")
+    root.deleteDir()
+    root.mkdirs()
+    HashMap<String, ArrayList<File>> modifiedFiles = new HashMap<>();
+    input.files.each {
+        File folder ->
+            def tree
+            if (folder.isDirectory()) { //either normal directory, or jar
+                tree = fileTree(folder);
+                tree.each {
+                    File innerFile ->
+                        //String fileName = innerFile.relativePath.toString();
+                        String fileName = (folder.toURI()).relativize(innerFile.toURI()).toString()
+                        if (!modifiedFiles.containsKey(fileName)) {
+                            modifiedFiles.put(fileName, new ArrayList<File>());
+                        }
+                        modifiedFiles.get(fileName).add(innerFile);
+                }
+            } else {
+                tree = zipTree(folder);
+                String folderName = folder.name
+                try {
+                    tree.each {
+                        File innerFile ->
+                            //String fileName = innerFile.relativePath.toString();
+                            File parent = innerFile
+                            while (!parent.name.contains(folderName)) {
+                                parent = parent.getParentFile();
+                            }
+                            String fileName = (parent.toURI()).relativize(innerFile.toURI()).toString()
+                            if (!modifiedFiles.containsKey(fileName)) {
+                                modifiedFiles.put(fileName, new ArrayList<File>());
+                            }
+                            modifiedFiles.get(fileName).add(innerFile);
+                    }
+                }
+                catch (Exception e) {
+
+                }
+            }
+    }
+    ArrayList<File> merged = new ArrayList<File>();
+    for (Map.Entry<String, Object> entry : modifiedFiles.entrySet()) {
+        String key = entry.getKey();
+        Object value = entry.getValue();
+        if (value.size() > 1) {
+            resolveDuplicates(key, new File("$buildDir/merged/" + key), value.get(0), value);
+            println("Duplicated " + value.get(0).name);
+        }
+    }
+    return merged;
+}
+
+ext.mergers = new HashMap<String, DuplicateFileManager>();
+ext.mergers.put('META-INF/LICENSE.txt', new ConcatenateDuplicates());
+ext.mergers.put('version/version.xml', new PickMain());
+ext.mergers.put('version/embracetrust.tst', new PickMain());
+ext.mergers.put('META-INF/DEPENDENCIES', new PickMain());
+ext.mergers.put('META-INF/DEPENDENCIES.txt', new PickMain());
+ext.mergers.put('META-INF/NOTICE.txt', new PickMain());
+ext.mergers.put('META-INF/NOTICE', new PickMain());
+ext.mergers.put('META-INF/LICENSE', new ConcatenateDuplicates());
+ext.mergers.put('license/LICENSE.txt', new ConcatenateDuplicates());
+ext.mergers.put('META-INF/org/apache/logging/log4j/core/config/plugins/Log4j2Plugins.dat', new Log4j2Concatenator());
+ext.pickMain = new PickMain();
+
+void resolveDuplicates(String relativeFileName, File mergeResult, File mainFile, List<File> allFiles) {
+    if (ext.mergers.containsKey(relativeFileName)) {
+        ext.mergers.get(relativeFileName).resolveDuplicates(mergeResult, mainFile, allFiles);
+    } else {
+        ext.pickMain.resolveDuplicates(mergeResult, mainFile, allFiles);
+    }
+}
+
+void defineProperty(String name, String defaultValue) {
+    if (!project.hasProperty(name)) {
+        project.ext.set(name, defaultValue);
+    }
+}
+
+// Export methods by turning them into closures
+// https://stackoverflow.com/a/23290820/4489577 hero
+ext {
+    getCommandLineArgs = this.&getCommandLineArgs
+    updateDebugTaskArgs = this.&updateDebugTaskArgs
+    getVersionFilePath = this.&getVersionFilePath
+    copyArtifacts = this.&copyArtifacts
+    platformImage = this.&platformImage
+    getAppName = this.&getAppName
+    getMergedDuplicates = this.&getMergedDuplicates
+    signJar = this.&signJar
+}

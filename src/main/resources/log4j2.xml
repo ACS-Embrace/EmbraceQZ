@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <CustomLevels>
+        <CustomLevel name="SEVERE" intLevel="200" />
+        <CustomLevel name="WARNING" intLevel="300" />
+        <CustomLevel name="FINE" intLevel="650" />
+        <CustomLevel name="FINER" intLevel="700" />
+        <CustomLevel name="FINEST" intLevel="750" />
+    </CustomLevels>
+    <Appenders>
+        <Console name="EmbraceConsole" target="SYSTEM_OUT">
+            <PatternLayout pattern="%highlight{%d{HH:mm:ss.SSS} %-5level %logger{36} %msg %throwable{full}}{FATAL=red, ERROR=red, SEVERE=red, WARN=yellow bold, WARNING=yellow bold, INFO=black, DEBUG=green bold, TRACE=blue, FINE=blue, FINER=blue, FINEST=blue}%n"/>
+        </Console>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+        </Console>
+    </Appenders>
+
+    <Loggers>
+        
+        <Logger name="za.co.embrace" level="info" additivity="false">
+            <AppenderRef ref="EmbraceConsole"/>
+        </Logger>
+        <Root level="warn">
+            <AppenderRef ref="EmbraceConsole"/>
+        </Root>
+    </Loggers>
+
+</Configuration>
+<!--https://logging.apache.org/log4j/2.x/manual/layouts.html#PatternLayout-->

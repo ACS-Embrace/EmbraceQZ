@@ -1,0 +1,437 @@
+import org.gradle.api.tasks.JavaExec
+import org.gradle.api.tasks.testing.Test
+import org.apache.tools.ant.taskdefs.condition.Os
+import java.text.SimpleDateFormat
+import org.apache.tools.ant.taskdefs.condition.Os
+import java.text.DateFormat;
+import java.util.Date;
+
+//
+// This file is to be applied to every subproject.
+//
+apply plugin: 'java'
+apply plugin: 'application'
+
+String pattern = "HH:mm:ss.SSSZ";
+SimpleDateFormat simpleDateFormat = new SimpleDateFormat(pattern);
+String date = simpleDateFormat.format(new Date());
+System.out.println(project.name + " configuration started at " + date);
+project.ext.set("extension", "")
+if (!project.hasProperty("jdk")) {
+    if (Os.isFamily(Os.FAMILY_MAC)) {
+        project.ext.set("jdk", "/Library/Java/JavaVirtualMachines/jdk-16.0.1.jdk/Contents/Home")
+    } else if (Os.isFamily(Os.FAMILY_UNIX)) {
+        project.ext.set("jdk", "/usr/lib/jvm/java-1.11.0-openjdk-amd64")
+    } else {
+        project.ext.set("jdk", "C:/Program Files/Java/jdk-19.0.2")
+        project.ext.set("extension", ".exe")
+    }
+}
+
+if (project.hasProperty("custom_jdk_home")) {
+    //for use with build pipeline. 
+    //Pass arg line parameter: -P custom_jdk_home='/some location'
+    project.ext.set("jdk", "$custom_jdk_home")
+    println "using custom jdk home: $custom_jdk_home"
+}
+else {
+    println "not using custom jdk home"
+}
+
+if (!project.hasProperty("jdk32")) {
+    project.ext.set("jdk32", 'C:/Program Files (x86)/Java/jdk1.8.0_181')
+}
+
+if (!project.hasProperty("devJdk")) {
+    project.ext.set("devJdk", jdk)
+}
+
+if(!project.hasProperty("jdkExtension")){
+    project.ext.set("jdkExtension", project.ext.get("extension"))
+}
+
+if (!project.hasProperty("devOperatingSystem")) {
+    project.ext.set("devOperatingSystem", "win64")
+}
+
+if (!project.hasProperty("embraceJvmOptionsProduction")) {
+    project.ext.embraceJvmOptionsProduction = []
+}
+if (!project.hasProperty("embraceJvmPropertiesProduction")) {
+    project.ext.embraceJvmPropertiesProduction = ["java.locale.providers=HOST,JRE,SPI"]
+}
+if (!project.hasProperty("embraceJvmOptionsDev")) {
+    project.ext.embraceJvmOptionsDev = []
+}
+if (!project.hasProperty("embraceJvmPropertiesDev")) {
+    project.ext.embraceJvmPropertiesDev = []
+}
+if (!project.hasProperty("embraceJvmOptionsDebug")) {
+    project.ext.embraceJvmOptionsDebug = project.ext.embraceJvmOptionsDev
+}
+if (!project.hasProperty("embraceJvmPropertiesDebug")) {
+    project.ext.embraceJvmPropertiesDebug = project.ext.embraceJvmPropertiesDev
+}
+if (!project.hasProperty("runWithDevOptions")) {
+    project.ext.runWithDevOptions = true
+}
+if (!project.hasProperty("embraceEnableAssertions")) {
+    project.ext.embraceEnableAssertions = true
+}
+if (!project.hasProperty("fullName")) {
+    project.ext.fullName = "fullname"
+}
+
+if (!project.hasProperty("assetcombine")) {
+    project.ext.set("assetcombine", false)
+}
+
+def currentOS = org.gradle.internal.os.OperatingSystem.current()
+def plat
+if (currentOS.isWindows()) {
+    plat = 'win'
+} else if (currentOS.isLinux()) {
+    plat = 'linux'
+} else if (currentOS.isMacOsX()) {
+    plat = 'mac'
+}
+
+ext {
+    //export these methods to the other gradle properties.
+    getEmbraceJVMOptionsDebug = this.&getEmbraceJVMOptionsDebug
+    getEmbraceJVMPropertiesDebug = this.&getEmbraceJVMPropertiesDebug
+    getEmbraceJVMOptions = this.&getEmbraceJVMOptions
+    getEmbraceJVMProperties = this.&getEmbraceJVMProperties
+}
+
+configurations {
+    includeInOutput //completely separate configuration that we can add to and it'll get added to the jar
+    baseConfiguration //the base code that should be in the patch, will contains providedModule, but we can subtract that out.
+    providedModule //modules that are part of installers only, not in patches
+    platformSpecific //code that is platform specific
+    includeInPatch {
+        transitive = false
+    }
+
+    implementation.extendsFrom platformSpecific
+    implementation.extendsFrom providedModule
+    implementation.extendsFrom baseConfiguration
+    everythingConfiguration.extendsFrom implementation {
+        canBeResolved = true
+    }
+
+    runtimeOnlyResolvable.extendsFrom runtimeOnly {
+        canBeResolved = true
+    }
+}
+
+tasks.withType(JavaCompile) {
+    //enable compilation in a separate daemon process
+    options.fork = true
+    options.compilerArgs += ["-XDstringConcat=inline"]
+    //important for IOS. See http://docs.gluonhq.com/gluonvm/ at the very bottom
+    options.forkOptions.with {
+        memoryMaximumSize = "2048m"
+        //executable = "${project.ext.jdk}/bin/javac" //apparently this was never working and fails with gradle 7.6 because it's missing the .exe
+    }
+    //options.forkOptions.jvmArgs += '-J-Xss4m'
+    options.encoding = 'UTF-8'
+    doFirst {
+        println("Compiling using JDK " + project.ext.get("jdk"))
+    }
+}
+
+test {
+    executable = "${project.ext.jdk}/bin/java${project.ext.extension}"
+    doFirst {
+        println("Running Test using JDK " + project.ext.get("jdk"))
+    }
+}
+
+
+String mavenGroupId = 'za.co.embrace'
+String mavenVersion = ''
+apply plugin: 'idea'
+/*
+Now we have upgraded to Java17 in order to have everything work with JHipster
+
+//these need to stay at 1.11. CloudPrintServer runs on java11 and it's easiest if everything shares the same compatability.
+//The latest javafx needs Java 17, so as long as we run the different projects with the right jdk, it should be fine.
+sourceCompatibility = 1.11
+targetCompatibility = 1.11
+
+*/
+sourceCompatibility = 17
+targetCompatibility = 17
+
+idea.module.downloadJavadoc = true
+idea.module.downloadSources = true
+
+repositories {
+    mavenCentral()
+    maven {
+        url "file://${rootDir}/Repository"
+    }
+    maven {
+        url "file://${rootDir}/JavaFXRepo"
+    }
+    maven {
+        url  "https://assetbuilder-maven-repo.s3.us-east-2.amazonaws.com/snapshots/"
+    }
+//    maven {
+//        url "file://${rootDir}/../EmbraceAssetBuilder/snapshots"
+//    }
+    maven {
+        url 'https://repo.repsy.io/mvn/devops_embrace/attachextended/'
+    }
+    maven {
+        url 'https://repo.repsy.io/mvn/devops_embrace/attachextended-dev/'
+    }
+    maven {
+        url 'https://nexus.gluonhq.com/nexus/content/repositories/releases'
+    }
+    jcenter()
+
+    maven {
+        url 'https://repo.repsy.io/mvn/devops_embrace/attach'
+    }
+
+    maven { url "https://jitpack.io" }
+}
+
+dependencies {
+    // Adding dependencies here will add the dependencies to each subproject.
+    testImplementation group: 'junit', name: 'junit', version: '4.12'
+    testImplementation 'io.qameta.allure:allure-junit4:2.19.0'
+}
+
+configurations.all {
+    resolutionStrategy.cacheChangingModulesFor 0, 'seconds'
+}
+
+buildscript {
+    repositories {
+        mavenCentral()
+        maven {
+            url "https://oss.sonatype.org/content/repositories/snapshots"
+        }
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+        jcenter()
+
+    }
+}
+
+String mavenArtifactId = name
+
+group = mavenGroupId
+version = mavenVersion
+
+task sourcesJar(type: Jar, dependsOn: classes, description: 'Creates a jar from the source files.') {
+    archiveClassifier = 'sources'
+    from sourceSets.main.allSource
+}
+
+artifacts {
+    archives jar
+    archives sourcesJar
+}
+
+//configure(install.repositories.mavenInstaller) {
+//    pom.project {
+//        groupId = mavenGroupId
+//        artifactId = mavenArtifactId
+//        version = mavenVersion
+//    }
+//}
+
+task createFolders(description: 'Creates the source folders if they do not exist.') doLast {
+    sourceSets*.allSource*.srcDirs*.each { File srcDir ->
+        if (!srcDir.isDirectory()) {
+            println "Creating source folder: ${srcDir}"
+            srcDir.mkdirs()
+        }
+    }
+}
+
+
+//run {
+//    //executable("${devJdk}/bin/java")
+//    doFirst {
+//        jvmArgs(getEmbraceJVMOptions())
+//        jvmArgs(getEmbraceJVMProperties())
+//        println("run in common.gradle")
+//        def mods = configurations.providedModule
+//        //mods = mods.filter{ File file ->
+//        //    file.name.contains( "javafx" )
+//        //}
+//        if (mods.asPath != "") {
+//            jvmArgs +=[
+//            "--module-path="+mods.asPath
+//            ]
+//        }
+//        println("Run with args: " + jvmArgs)
+//        logger.quiet(jvmArgs.toString())
+//    }
+//}
+
+//gradle.taskGraph.beforeTask { Task task ->
+//    if (task instanceof Test || task instanceof JavaExec) {
+//
+//    }
+//}
+tasks.withType(JavaExec) {
+    doFirst {
+        jvmArgs(getEmbraceJVMOptions())
+        jvmArgs(getEmbraceJVMProperties())
+        println("run in common.gradle")
+        def mods = configurations.providedModule
+        //mods = mods.filter{ File file ->
+        //    file.name.contains( "javafx" )
+        //}
+        final FileCollection javaFXPlatformJars = configurations.providedModule.filter{it.getName().endsWith("-${plat}.jar")}
+        jvmArgs += ["-Dtest.mode=false"]
+        if (javaFXPlatformJars.asPath != "") {
+            jvmArgs += [
+                    "--module-path=" + javaFXPlatformJars.asPath
+            ]
+        }
+        try {
+            println("Run with args: " + allJvmArgs)
+            println("Running using JDK " + project.ext.get("jdk"))
+            logger.quiet("Running using JDK " + project.ext.get("jdk"))
+            logger.quiet(allJvmArgs.toString())
+        }
+        catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+}
+
+tasks.withType(Test) {
+    doFirst {
+        if (project.gradle.startParameter.getTaskRequests().size() > 0
+                && project.gradle.startParameter.getTaskRequests().get(0).getArgs().contains("--debug-jvm")) {
+            //jvmArgs(getEmbraceJVMOptionsDebug()) the add modules statement messes all the tests up for some reason
+            jvmArgs(getEmbraceJVMPropertiesDebug())
+        } else {
+            //jvmArgs(getEmbraceJVMOptions()) the add modules statement messes all the tests up for some reason
+            jvmArgs(getEmbraceJVMProperties())
+        }
+        final FileCollection javaFXPlatformJars = configurations.providedModule.filter{it.getName().endsWith("-${plat}.jar")}
+        jvmArgs += ["-Dtest.mode=true"]
+        if (javaFXPlatformJars.asPath != "") {
+            jvmArgs += [
+                    "--module-path=" + javaFXPlatformJars.asPath
+            ]
+        }
+        println("Running test using JDK " + project.ext.get("jdk"))
+        logger.quiet("Running test using JDK " + project.ext.get("jdk"))
+        logger.quiet("all test args:" + allJvmArgs.toString());
+        logger.quiet("Target compatibility " + targetCompatibility + " " + JavaVersion.current());
+    }
+}
+
+//test {
+//    doFirst {
+//        jvmArgs(getEmbraceJVMOptionsDebug())
+//        jvmArgs(getEmbraceJVMPropertiesDebug())
+//        def mods = configurations.providedModule
+//        if (mods.asPath != "") {
+//            jvmArgs +=[
+//            "--module-path="+mods.asPath
+//            ]
+//        }
+//        logger.quiet(jvmArgs.toString())
+//    }
+//}
+
+task embraceRunSingle(type: JavaExec) {
+    //classesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.main.runtimeClasspath
+    classpath += sourceSets.test.runtimeClasspath
+    // This runs it from the class files, not the jar...
+    doFirst {
+        if (project.hasProperty("mainClass")) {
+            println("Setting main class to " + project.ext.mainClass)
+            main = "${project.ext.mainClass}"
+
+        }
+        jvmArgs(getEmbraceJVMOptions(true))
+        jvmArgs(getEmbraceJVMProperties(true))
+        def mods = configurations.providedModule
+        //mods = mods.filter{ File file ->
+        //    file.name.contains( "javafx" )
+        //}
+        final FileCollection javaFXPlatformJars = configurations.providedModule.filter{it.getName().endsWith("-${plat}.jar")}
+        if (javaFXPlatformJars.asPath != "") {
+            jvmArgs += [
+                    "--module-path=" + javaFXPlatformJars.asPath
+            ]
+        }
+        logger.quiet(jvmArgs.toString())
+        logger.quiet(commandLine.toString())
+    }
+
+    run {
+
+    }
+}
+
+task unitTest(type: Test, description: 'Runs the unit tests.', group: 'Verification') {
+    exclude 'za/co/embrace/connection/**'
+    exclude 'za/co/embrace/telnet/**'
+}
+
+
+List<String> getEmbraceJVMOptions() {
+    return getEmbraceJVMOptions(true);
+}
+
+List<String> getEmbraceJVMProperties() {
+    return getEmbraceJVMProperties(true);
+}
+
+List<String> getEmbraceJVMOptions(boolean dev) {
+    List<String> props = embraceJvmOptionsProduction
+    if (dev) {
+        props = embraceJvmOptionsDev
+    }
+    List<String> ret = new ArrayList<>();
+    for (String prop : props) {
+        ret.add("-" + prop)
+    }
+    println("Common.gradle getEmbraceJVMOptions " + ret)
+    return ret
+}
+
+List<String> getEmbraceJVMProperties(boolean dev) {
+    List<String> props = embraceJvmPropertiesProduction
+    if (dev) {
+        props = embraceJvmPropertiesDev
+    }
+    List<String> ret = new ArrayList<>();
+    for (String prop : props) {
+        ret.add("-D" + prop)
+    }
+    return ret
+}
+
+List<String> getEmbraceJVMOptionsDebug() {
+    List<String> props = embraceJvmOptionsDebug
+    List<String> ret = new ArrayList<>();
+    for (String prop : props) {
+        ret.add("-" + prop)
+    }
+    return ret
+}
+
+List<String> getEmbraceJVMPropertiesDebug() {
+    List<String> props = embraceJvmPropertiesDebug
+    List<String> ret = new ArrayList<>();
+    for (String prop : props) {
+        ret.add("-D" + prop)
+    }
+    return ret
+}
