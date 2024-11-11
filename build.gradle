@@ -129,26 +129,28 @@ dependencies {
     implementation fileTree(dir: '/lib/charsets', include: '*.jar')
 }
 
+mainClassName = project.ext.get('mainClass')
+
 publishing {
     publications {
-        maven(MavenPublication) {
+        mavenJava(MavenPublication) {
+            version = project.ext.get('applicationVersion')
             from components.java
         }
-
-
     }
 
     repositories {
         maven {
-            url = 'https://repo.repsy.io/mvn/devops_embrace/qz'
-            credentials {
-                username repsyUsername
-                password repsyPassword
+            url "s3://embrace-maven-archive/releases"
+            credentials(AwsCredentials){
+                accessKey System.getenv('AWS_ACCESS_KEY')
+                secretKey System.getenv('AWS_SECRET')
             }
         }
     }
 }
 
-mainClassName = project.ext.get('mainClass')
+
+
 
 
