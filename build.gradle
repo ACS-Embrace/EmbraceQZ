@@ -144,12 +144,13 @@ publishing {
     repositories {
         // Embrace's Maven store on S3. The key comes from the AWS_ACCESS_KEY / AWS_SECRET environment
         // variables (as the GitHub workflows set them) or the AWS_Key / AWS_Secret Gradle properties.
+        // Trimmed, because a secret pasted with a trailing space or newline fails with SignatureDoesNotMatch.
         maven {
             name = 'EmbraceS3'
             url = 's3://embrace-maven-archive/releases'
             credentials(AwsCredentials) {
-                accessKey = System.getenv('AWS_ACCESS_KEY') ?: (project.findProperty('AWS_Key') ?: '')
-                secretKey = System.getenv('AWS_SECRET') ?: (project.findProperty('AWS_Secret') ?: '')
+                accessKey = (System.getenv('AWS_ACCESS_KEY') ?: (project.findProperty('AWS_Key') ?: '')).toString().trim()
+                secretKey = (System.getenv('AWS_SECRET') ?: (project.findProperty('AWS_Secret') ?: '')).toString().trim()
             }
         }
     }

@@ -81,6 +81,10 @@ jobs:
             echo "::error::AWS_ACCESS_KEY and AWS_SECRET are not set for this repository. A repository admin adds them under Settings > Secrets and variables > Actions."
             exit 1
           fi
+          # Lengths only, never the values: an AWS access key ID is 20 characters and a secret 40.
+          K=$(printf '%s' "$AWS_ACCESS_KEY" | tr -d '[:space:]'); S=$(printf '%s' "$AWS_SECRET" | tr -d '[:space:]')
+          echo "Access key: ${#AWS_ACCESS_KEY} characters (${#K} without spaces), starts with ${K:0:4}"
+          echo "Secret: ${#AWS_SECRET} characters (${#S} without spaces)"
 
       - name: Publish to s3://embrace-maven-archive/releases
         shell: bash
