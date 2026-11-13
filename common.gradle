@@ -182,19 +182,10 @@ repositories {
 //        url "file://${rootDir}/../EmbraceAssetBuilder/snapshots"
 //    }
     maven {
-        url 'https://repo.repsy.io/mvn/devops_embrace/attachextended/'
-    }
-    maven {
-        url 'https://repo.repsy.io/mvn/devops_embrace/attachextended-dev/'
-    }
-    maven {
         url 'https://nexus.gluonhq.com/nexus/content/repositories/releases'
     }
     jcenter()
 
-    maven {
-        url 'https://repo.repsy.io/mvn/devops_embrace/attach'
-    }
 
     maven { url "https://jitpack.io" }
 }

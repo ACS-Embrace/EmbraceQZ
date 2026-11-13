@@ -14,8 +14,7 @@ def plat
 def ver = "21-ea+5" //make sure you change the version in desktopdesktop-base.gradle as well
 def verWeb = "19.0.2.1" //update the verWeb in desktopdesktop-base.gradle only
 if (currentOS.isWindows()) {
-    ver = "21-internal+"
-    //ver = "18-internal+"
+    // Was "21-internal+", a private JavaFX build that was only on repsy. The public 21-ea+5 is what Linux uses.
     plat = 'win'
 } else if (currentOS.isLinux()) {
     plat = 'linux'
@@ -27,7 +26,7 @@ if (currentOS.isWindows()) {
 //ver = '11.0.1'
 repositories {
     maven {
-        url "https://repo.repsy.io/mvn/deanwookey/jfxtest"
+        url "https://embrace-maven-archive.s3.us-east-2.amazonaws.com/releases/"
     }
 }
 dependencies {
@@ -66,9 +65,8 @@ dependencies {
     testImplementation "org.testfx:openjfx-monocle:jdk-12.0.1+2" // For Java 11
     //    testCompile "org.testfx:openjfx-monocle:jdk-9+181" // For Java 9
     //    testCompile "org.testfx:openjfx-monocle:8u76-b04" // For Java 8
-    implementation("com.gluonhq.attachextended:keyboard:4.0.14.9-CUSTOM") {
-        exclude group: "org.openjfx"
-    }
+    // The keyboard library (com.gluonhq.attachextended:keyboard) was removed: QZ does not use it, and the
+    // version listed was only ever on repsy, which no longer exists.
 
     //base "com.gluonhq.attach:util:4.0.6"
     //base "com.gluonhq.attach:keyboard:4.0.7-SNAPSHOT"
