@@ -86,6 +86,18 @@ jobs:
           echo "Access key: ${#AWS_ACCESS_KEY} characters (${#K} without spaces), starts with ${K:0:4}"
           echo "Secret: ${#AWS_SECRET} characters (${#S} without spaces)"
 
+      - name: Check the key pair with AWS before publishing
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET }}
+          AWS_DEFAULT_REGION: us-east-2
+        run: |
+          aws sts get-caller-identity --query Arn --output text
+          echo "test" > qz-publish-check.txt
+          aws s3 cp qz-publish-check.txt s3://embrace-maven-archive/releases/za/co/embrace/QZ/publish-check.txt
+          aws s3 rm s3://embrace-maven-archive/releases/za/co/embrace/QZ/publish-check.txt || true
+
       - name: Publish to s3://embrace-maven-archive/releases
         shell: bash
         env:
