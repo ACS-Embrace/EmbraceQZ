@@ -1,6 +1,6 @@
 # Builds QZ on every push and pull request. Publishing to Embrace's Maven store on S3
 # (s3://embrace-maven-archive/releases) is manual: Actions > "Build and publish QZ" > Run workflow,
-# with "publish" ticked. It needs the repository secrets AWS_ACCESS_KEY and AWS_SECRET, with write
+# with "publish" ticked, or push a commit whose message contains [publish]. It needs the repository secrets AWS_ACCESS_KEY and AWS_SECRET, with write
 # access to that bucket. Raise applicationVersion in build.gradle before publishing: a re-run with
 # the same version overwrites the jar that is already there.
 name: Build and publish QZ
@@ -61,7 +61,7 @@ jobs:
 
   publish:
     needs: build
-    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    if: (github.event_name == 'workflow_dispatch' && inputs.publish) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[publish]'))
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
