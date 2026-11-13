@@ -34,7 +34,7 @@ jobs:
         shell: bash
         run: |
           ./gradlew dependencies --configuration runtimeClasspath --console=plain > deps.txt
-          if grep -E 'log4j:log4j|slf4j-log4j12|slf4j-reload4j' deps.txt; then
+          if grep -E ' log4j:(log4j|apache-log4j-extras):|slf4j-log4j12|slf4j-reload4j' deps.txt; then
             echo "::error::log4j 1.2 or its slf4j binding is on the runtime classpath"
             exit 1
           fi
