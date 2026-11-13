@@ -1,0 +1,99 @@
+# Builds QZ on every push and pull request. Publishing to Embrace's Maven store on S3
+# (s3://embrace-maven-archive/releases) is manual: Actions > "Build and publish QZ" > Run workflow,
+# with "publish" ticked. It needs the repository secrets AWS_ACCESS_KEY and AWS_SECRET, with write
+# access to that bucket. Raise applicationVersion in build.gradle before publishing: a re-run with
+# the same version overwrites the jar that is already there.
+name: Build and publish QZ
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish this build to S3'
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build the jar and pom
+        shell: bash
+        run: ./gradlew jar generatePomFileForMavenPublication --console=plain
+
+      - name: Check no log4j 1.2 is on the runtime classpath
+        shell: bash
+        run: |
+          ./gradlew dependencies --configuration runtimeClasspath --console=plain > deps.txt
+          if grep -E 'log4j:log4j|slf4j-log4j12|slf4j-reload4j' deps.txt; then
+            echo "::error::log4j 1.2 or its slf4j binding is on the runtime classpath"
+            exit 1
+          fi
+          grep -E 'org.apache.logging.log4j' deps.txt | sort -u
+
+      - name: Say whether the AWS publishing key is available here
+        shell: bash
+        env:
+          AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+          AWS_SECRET: ${{ secrets.AWS_SECRET }}
+        run: |
+          if [ -n "$AWS_ACCESS_KEY" ] && [ -n "$AWS_SECRET" ]; then
+            echo "AWS_ACCESS_KEY and AWS_SECRET are set for this repository."
+          else
+            echo "::warning::AWS_ACCESS_KEY and AWS_SECRET are not set for this repository, so publishing will fail. A repository admin adds them under Settings > Secrets and variables > Actions."
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QZ-build
+          path: |
+            build/libs/*.jar
+            build/publications/maven/pom-default.xml
+
+  publish:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Check the AWS key is set
+        shell: bash
+        env:
+          AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+          AWS_SECRET: ${{ secrets.AWS_SECRET }}
+        run: |
+          if [ -z "$AWS_ACCESS_KEY" ] || [ -z "$AWS_SECRET" ]; then
+            echo "::error::AWS_ACCESS_KEY and AWS_SECRET are not set for this repository. A repository admin adds them under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Publish to s3://embrace-maven-archive/releases
+        shell: bash
+        env:
+          AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+          AWS_SECRET: ${{ secrets.AWS_SECRET }}
+        run: ./gradlew publishMavenPublicationToEmbraceS3Repository --console=plain
+
+      - name: Check the published pom can be downloaded
+        shell: bash
+        run: |
+          VERSION=$(grep -oE "applicationVersion = '[^']+'" build.gradle | cut -d"'" -f2)
+          URL="https://embrace-maven-archive.s3.us-east-2.amazonaws.com/releases/za/co/embrace/QZ/${VERSION}/QZ-${VERSION}.pom"
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL")
+          echo "$URL returned $CODE"
+          [ "$CODE" = "200" ]

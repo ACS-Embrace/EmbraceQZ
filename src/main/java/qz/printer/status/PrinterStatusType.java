@@ -1,6 +1,6 @@
 package qz.printer.status;
 
-import org.apache.log4j.Level;
+import org.apache.logging.log4j.Level;
 
 import java.util.Collections;
 import java.util.SortedMap;

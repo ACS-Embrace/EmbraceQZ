@@ -1,8 +1,11 @@
 package qz.ui;
 
-import org.apache.log4j.Level;
-import org.apache.log4j.PatternLayout;
-import org.apache.log4j.WriterAppender;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.WriterAppender;
+import org.apache.logging.log4j.core.config.Configuration;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import qz.ui.component.IconCache;
 import qz.ui.component.LinkLabel;
 import qz.utils.FileUtilities;
@@ -15,6 +18,8 @@ import java.awt.event.KeyEvent;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Created by Tres on 2/26/2015.
@@ -61,7 +66,7 @@ public class LogDialog extends BasicDialog {
         setResizable(true);
 
         // add new appender to Log4J just for text area
-        logStream = new WriterAppender(new PatternLayout("[%p] %d{ISO8601} @ %c:%L%n\t%m%n"), new OutputStream() {
+        OutputStream textAreaStream = new OutputStream() {
             @Override
             public void write(final int b) throws IOException {
                 SwingUtilities.invokeLater(new Runnable() {
@@ -72,17 +77,38 @@ public class LogDialog extends BasicDialog {
                     }
                 });
             }
-        });
-        logStream.setThreshold(Level.TRACE);
+        };
+        LoggerContext context = (LoggerContext)LogManager.getContext(false);
+        logStream = WriterAppender.newBuilder()
+                .setName("QZLogDialog")
+                .setTarget(new OutputStreamWriter(textAreaStream, StandardCharsets.UTF_8))
+                .setLayout(PatternLayout.newBuilder()
+                                   .withPattern("[%p] %d{ISO8601} @ %c:%L%n	%m%n")
+                                   .withConfiguration(context.getConfiguration())
+                                   .build())
+                .setFollow(true)
+                .build();
+        logStream.start();
     }
 
     @Override
     public void setVisible(boolean visible) {
         if (visible) {
             logArea.setText(null);
-            org.apache.log4j.Logger.getRootLogger().addAppender(logStream);
+            Configuration config = ((LoggerContext)LogManager.getContext(false)).getConfiguration();
+            config.getRootLogger().addAppender(logStream, Level.TRACE, null);
+            if (config.getLoggers().containsKey("qz")) {
+                config.getLoggerConfig("qz").addAppender(logStream, Level.TRACE, null);
+            }
+            ((LoggerContext)LogManager.getContext(false)).updateLoggers();
         } else {
-            org.apache.log4j.Logger.getRootLogger().removeAppender(logStream);
+            LoggerContext context = (LoggerContext)LogManager.getContext(false);
+            Configuration config = context.getConfiguration();
+            config.getRootLogger().removeAppender(logStream.getName());
+            if (config.getLoggers().containsKey("qz")) {
+                config.getLoggerConfig("qz").removeAppender(logStream.getName());
+            }
+            context.updateLoggers();
         }
 
         super.setVisible(visible);

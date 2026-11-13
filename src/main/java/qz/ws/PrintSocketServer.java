@@ -10,11 +10,18 @@
 
 package qz.ws;
 
-import org.apache.log4j.Level;
-import org.apache.log4j.PatternLayout;
-import org.apache.log4j.rolling.FixedWindowRollingPolicy;
-import org.apache.log4j.rolling.RollingFileAppender;
-import org.apache.log4j.rolling.SizeBasedTriggeringPolicy;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.Appender;
+import org.apache.logging.log4j.core.Filter;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.RollingFileAppender;
+import org.apache.logging.log4j.core.appender.rolling.DefaultRolloverStrategy;
+import org.apache.logging.log4j.core.appender.rolling.SizeBasedTriggeringPolicy;
+import org.apache.logging.log4j.core.config.Configuration;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.filter.ThresholdFilter;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.server.*;
 import org.eclipse.jetty.servlet.ServletContextHandler;
@@ -39,6 +46,7 @@ import qz.utils.SystemUtilities;
 import javax.swing.*;
 import java.io.*;
 import java.net.BindException;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -103,25 +111,51 @@ public class PrintSocketServer {
         log.warn("The web socket server is no longer running");
     }
 
+    /**
+     * Sends QZ's own logging (the qz packages) to a rolling debug.log in the user folder, at DEBUG and above,
+     * keeping 5 old files of 512KB each. Warnings and errors still go to the console appenders set up in log4j2.xml.
+     */
     private static void setupFileLogging() {
-        FixedWindowRollingPolicy rollingPolicy = new FixedWindowRollingPolicy();
-        rollingPolicy.setFileNamePattern(FileUtilities.USER_DIR + File.separator + Constants.LOG_FILE + ".log.%i");
-        rollingPolicy.setMaxIndex(Constants.LOG_ROTATIONS);
+        LoggerContext context = (LoggerContext)LogManager.getContext(false);
+        Configuration config = context.getConfiguration();
+        String logFile = FileUtilities.USER_DIR + File.separator + Constants.LOG_FILE + ".log";
 
-        SizeBasedTriggeringPolicy triggeringPolicy = new SizeBasedTriggeringPolicy(Constants.LOG_SIZE);
+        RollingFileAppender fileAppender = RollingFileAppender.newBuilder()
+                .setName("QZFile")
+                .withFileName(logFile)
+                .withFilePattern(logFile + ".%i")
+                .withPolicy(SizeBasedTriggeringPolicy.createPolicy(String.valueOf(Constants.LOG_SIZE)))
+                .withStrategy(DefaultRolloverStrategy.newBuilder()
+                                      .withMin("1")
+                                      .withMax(String.valueOf(Constants.LOG_ROTATIONS))
+                                      .withFileIndex("min")
+                                      .withConfig(config)
+                                      .build())
+                .setLayout(PatternLayout.newBuilder()
+                                   .withPattern("%d{ISO8601} [%p] %m%n")
+                                   .withCharset(StandardCharsets.UTF_8)
+                                   .withConfiguration(config)
+                                   .build())
+                .setImmediateFlush(true)
+                .setConfiguration(config)
+                .build();
+        fileAppender.start();
+        config.addAppender(fileAppender);
 
-        RollingFileAppender fileAppender = new RollingFileAppender();
-        fileAppender.setLayout(new PatternLayout("%d{ISO8601} [%p] %m%n"));
-        fileAppender.setThreshold(Level.DEBUG);
-        fileAppender.setFile(FileUtilities.USER_DIR + File.separator + Constants.LOG_FILE + ".log");
-        fileAppender.setRollingPolicy(rollingPolicy);
-        fileAppender.setTriggeringPolicy(triggeringPolicy);
-        fileAppender.setEncoding("UTF-8");
+        // Third-party libraries keep the root level from log4j2.xml; they reach the file at that level.
+        config.getRootLogger().addAppender(fileAppender, null, null);
 
-        fileAppender.setImmediateFlush(true);
-        fileAppender.activateOptions();
-
-        org.apache.log4j.Logger.getRootLogger().addAppender(fileAppender);
+        // QZ's own classes log at DEBUG to the file, as they did under log4j 1, and only WARN and above to the console.
+        LoggerConfig rootConfig = config.getRootLogger();
+        LoggerConfig qzConfig = new LoggerConfig("qz", Level.DEBUG, false);
+        qzConfig.addAppender(fileAppender, Level.DEBUG, null);
+        for(Appender consoleAppender : rootConfig.getAppenders().values()) {
+            if (consoleAppender != fileAppender) {
+                qzConfig.addAppender(consoleAppender, Level.WARN, null);
+            }
+        }
+        config.addLogger("qz", qzConfig);
+        context.updateLoggers();
     }
 
     public static void runServer() {
